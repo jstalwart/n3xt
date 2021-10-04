@@ -10,3 +10,4 @@ However I am not sure if you will be able to use the algorithm to predict the va
 I am sorry, I have written the explanations in Spanish because I hoped to translate it later. However I have found myself in a situation in which i had no time, so 
 I have decided to let it be.
 
+Edit: I have uploaded the version in English. 
