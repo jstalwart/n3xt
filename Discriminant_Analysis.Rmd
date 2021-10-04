@@ -1,0 +1,185 @@
+---
+title: "Expected Goals Model"
+author: "Arnau Garcia i Cucó"
+date: "2/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(lattice)
+library(ggplot2)
+```
+
+# Load data
+
+```{r load_data, echo = TRUE}
+datos <- read.csv(file = 'data.csv')
+datos$goal <- factor(datos$goal)
+```
+
+# Descriptive analysis
+
+Para distinguir cualquier posible error en nuestros datos, es adecuado realizar primeramente un análisis descriptivo. A continuación se verá la estructura de los datos. 
+
+```{r, summary, echo = TRUE, include=TRUE}
+summary(datos)
+```
+
+La variable goal es una variable dummy que lo que nos indica con un 1 es que se ha marcado gol y con un 0 que no se ha hecho. Por otro lado, tenemos las coordenadas del disparo. El campo mide un total de 120x80 metros según la base de datos dada. Así pues, podemos comprobar que el disparo más lejano en el eje de las X se ha realizado desde 74.7 metros en el eje X y el más cercano desde la misma línea de fondo. El disparo promedio estará situado a los 15 metros de la portería. En cuanto a los ejes Y, hay disparos a lo largo de toda la anchura del campo siendo los más frecuentes desde los 20 metros del centro, es decir desde los 30 metros desde la banda derecha hasta los 30 por la banda izquierda. 
+
+Es muy destacable que no hay datos faltantes. 
+
+Observemos mejor cada variable. 
+
+```{r boxplotX, echo = TRUE, include = TRUE}
+boxplot(datos$X, horizontal = TRUE)
+legend ("topleft", legend = "Variable X") 
+```
+
+En el gráfico de caja y bigotes del gráfico X comprobamos que se tiene una distribución bastante desbalanceada, siendo así que los dispaaros, como ya habíamos dicho, se concentran en el campo de juego del defensor. Sin embargo, hay una serie de datos que podemos considerar anómalos situados a una distancia superior. De esta forma, en el gráfico Box&Whiskers observamos una cola a la izquierda. 
+
+```{r boxplotY, echo = TRUE, include=TRUE, message=FALSE}
+boxplot(datos$Y, horizontal = TRUE)
+legend ("topleft", legend = "Variable Y") 
+```
+
+En el caso de las variables Y, comprobamos que tiene una distribución más similar a la normal. Sin embargo, comprobamos la existencia de datos anómalos por la derecha y por la izquierda. Esto nos indica que la distribución será de tipo platicúrtica. 
+
+Observemos ahora la relación existente entre las dos variables. Para ello usaremos un gráfico de dispersión con las coordenadas de los disparos. 
+
+```{r show_goals, echo=TRUE}
+plot(datos$X, datos$Y)
+```
+
+Este gráfico nos muestra de una forma más adecuada desde donde se efectúan los disparos. La forma del gráfico es similar a la de un terreno de juego, siendo así que la portería hacia la que se dispara se encuentra a la derecha de la imagen. Así pues, comprobamos que la mayor parte de los disparos se efectúan desde el centro y desde menos de 80 metros de distancia. 
+
+Veamos ahora la variable a predecir, es decir, los goles que se marcan o se fallan.  
+
+```{r pie, echo = TRUE, include = TRUE, message = TRUE}
+pie(table(datos$goal), labels = c("Fail", "Goal"), main="Goals pie chart")
+```
+
+Viendo el gráfico, comprobamos que existe una baja cantidad de goles anotados en nuestro fichero de datos. Así pues en un análisis discriminante tendremos, inevitablemente un problema de clases desbalanceadas. Para ello podemos resolverlo con undersampling o con oversampling. Como no tenemos acceso a más datos, realizaremos undersampling. 
+
+```{r undersampling}
+library(tidyverse)
+datos$goal <- ifelse(datos$goal == 0, "Miss", "Score")
+datos2 <- datos
+datos2$goal <- ifelse(datos2$goal == "Score", "Miss", "Score")
+datos2$Click <- 0
+datos$Click <- 1
+datos <- rbind(datos, datos2)
+
+library(ROSE)
+ 
+balanced_sample = NULL
+ 
+ 
+for (c in unique(datos$goal)) {
+  tmp_df = datos%>%filter(goal=="Score")
+  tmp<-ovun.sample(Click ~ ., data = tmp_df, method = "under", p = 0.5, seed = 5)$data
+  balanced_sample<-rbind(balanced_sample, tmp)
+ }
+
+shots <- balanced_sample[, -4]
+shots$goal <- balanced_sample$Click
+```
+
+Observemos como las variables de posición afectan a la cantidad de goles anotados. 
+
+```{r plort_groupby}
+plot(shots$X, shots$Y, col=factor(shots$goal))
+legend("topleft", legend = levels(factor(shots$goal)), pch = 19, col = factor(levels(shots$goal)))
+```
+
+En este gráfico, se marca de tono rojo los disparos que terminan en gol, mientras que se marcan en negro los que fallan. De esta forma, observamos como los disparos más cercanos serán los que tienen más porcentaje de gol, cosa que por otro lado, también podríamos suponer desde un inicio. 
+
+Además podemos comprobar que hay cierta curvatura, siendo que los goles se registranen valores más altos de la variable X y valores medios de la variable Y. Así pues, este es un argumento a favor para que se use un análisis discriminante cuadrático. 
+
+Comprobemos si se observan las diferencias entre las dos clases (gol y fallo) de forma más separada en una variable que en la otra. 
+
+```{r exploration_data, echo=FALSE, include = TRUE, message = FALSE}
+library(ggplot2)
+library(ggpubr)
+p1 <- ggplot(data = shots, aes(x = X, fill = goal)) +
+      geom_histogram(position = "identity", alpha = 0.5)
+p2 <- ggplot(data = shots, aes(x = Y, fill = goal)) +
+      geom_histogram(position = "identity", alpha = 0.5)
+ggarrange(p1, p2, nrow = 2, common.legend = TRUE, legend = "bottom")
+```
+
+En estos histogramas observamos lo que ya era evidente, que los datos de fallos son bastante más que los datos de goles. Además, también observamos que en la variable X, la distribución de goles tampoco es normal. 
+
+Además, también observamos que en ninguna de las dos variables se puede distinguir de forma inequívoca las dos categorías.
+
+# Inferencia
+
+El objetivo final de este estudio es ser capaces de clasificar los disparos realizados en gol o en fallo mediante las coordenadas del disparo. Así pues, realizaremos un análisis discriminante para ser capaces de clasificar los disparos. 
+
+Para ello, realizaremos una división en los datos y los organizaremos en datos de entrenamiento y en datos de test. Los datos de entrenamiento serán los que usaremos para preparar el modelo, mientras que los datos de tipo test serán los que usaremos para predecir la variable. Los datos que usaremos como tipo entrenamiento serán el 80% de los datos, mientras que los de test serán el 20%. Para la validación usaremos el método de k-medias. 
+
+```{r dataPartition, echo=FALSE, include = TRUE, message = FALSE}
+library(caret)
+trainRows = createDataPartition(shots$goal, p=0.8, list = FALSE)
+trainData = shots[trainRows, ]
+testData = shots[-trainRows, ]
+myTrainControl = trainControl(method = "repeatedcv",  # k-fold
+                              number = 10,  # num folds
+                              repeats = 30) # num veces a repetir CV
+```
+
+Dentro del análisis discriminante, hay varios modelos que podemos implementar (lineal, cuadrático, mixto, etc). En este caso, se ha decidido usar el método cuadrático tal y como ya hemos explicado con anterioridad. 
+
+¿Es necesario estandarizar los datos? En este caso, no ya que en QDA se obtienen los mismos resultados de clasificación cuando los estandarizamos y cuando no lo hacemos. Además, el análisis discriminante cuadrático tiene la ventaja de poseer cierta robustez ante la no normalidad de alguna variable, aunque se deberá tener esto presente a la hora de interpretar los resultados. 
+
+```{r QDA_model, echo = FALSE, include = TRUE, message = FALSE}
+library(MASS)
+qda_model <- qda(goal ~ X + Y, data = trainData, CV = TRUE)
+qda_model2 <- qda(goal ~ X + Y, data = trainData)
+```
+
+# Evaluación de errores
+
+A continuación comprobaremos los errores que puede tener el modelo.
+
+```{r model_validation, echo=TRUE, include=TRUE}
+predicted <- predict(object = qda_model2, newdata = testData)
+table(testData$goal, predicted$class, 
+      dnn = c("Real Outcome", "Predict Outcome"))
+```
+
+Comprobamos que el modelo tiene una exactitud de `r (642+925)/2268` y una tasa de falsos positivos de `r 179/642`. 
+
+# Interpretación del modelo
+
+```{r interactive_graphic, message=FALSE, echo = TRUE}
+library(plotly)
+library(gapminder)
+
+predictions <- trainData
+predictions$probFail = qda_model$posterior[, 1]
+predictions$probGoal = qda_model$posterior[, 2]
+library(ggplot2)
+
+graph = ggplot(predictions, aes(X, Y, size=probGoal, color =probFail)) + geom_point()
+ggplotly(p = graph)
+```
+
+En el modelo obtenemos que cuanto más cerca estemos de los 120 metros en el eje X y más en el centro, mayor será nuestra probabilidad de marcar gol. 
+
+Para verlo mejor, se ha creado un modelo para predecir las probabilidades a partir de los datos que se inputen. 
+
+```{r echo = TRUE, include = TRUE, }
+
+new <- data.frame(row.names = c("X", "Y"))
+new$X <- readline(prompt = "Enter X: ")
+new$Y <- readline(prompt = "Enter Y: ")
+
+new$X <- as.numeric(new$X)
+new$Y <- as.numeric(new$Y)
+
+
+predict(object = qda_model2, newdata = new)
+```
