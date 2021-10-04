@@ -1,0 +1,191 @@
+---
+title: "Expected Goals Model"
+author: "Arnau Garcia i Cucó"
+date: "2/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(lattice)
+library(ggplot2)
+```
+
+# Load data
+
+```{r load_data, echo = TRUE}
+datos <- read.csv(file = 'data.csv')
+datos$goal <- factor(datos$goal)
+```
+
+# Descriptive analysis
+
+In order to distinguish any possible mistake in or data, it's appropiate to do a previous descriptive analysis. Next it will be shown the data structure in a breef summary. 
+
+```{r, summary, echo = TRUE, include=TRUE}
+summary(datos)
+```
+
+The goal variable is a dummy variable which shows with a 1 a goal scored and with a 0 a goal missed. Furthermore, it's known the shot coordinates. A football field is 120 meters long for 80 meters wide according to the database. 
+
+Therefore, it's possible to check in the variable X (long) the position where the further (46 m) and the nearest shot (0 m) were taken. Anyways the average shot is taken from 15 meters away from the goal.
+
+Talking about the wide variable (Y variable), the average shot is taken in the middle of the field. That means that although there are shots all along the field, they tend to concentrate from 30 meters to 60 meters from any touchline. 
+
+Also, it is very remarkable that there are not missing values. 
+
+Next the variables will be observed in further detail. 
+
+```{r boxplotX, echo = TRUE, include = TRUE}
+boxplot(datos$X, horizontal = TRUE)
+legend ("topleft", legend = "Variable X") 
+```
+
+In the variable X box&whiskers, it's shown that there is a unbalanced distribution, and the shots, as it had been said before, are usually taken from the atacking field. However, there are some cases that we could consider outliers that are shooted from a further distance. Consequently it's observable a tail in the left of the box. 
+
+```{r boxplotY, echo = TRUE, include=TRUE, message=FALSE}
+boxplot(datos$Y, horizontal = TRUE)
+legend ("topleft", legend = "Variable Y") 
+```
+
+On the other hand, the variable Y has a much more similar distribution to the Gauss bell, despite that some outliers remain in both sides of the box. Therefore, it can be assumed a platicurtic distribution. 
+
+To observe the relation between both variables it will be used the scatter plot with the shots coordinates. 
+
+
+```{r show_goals, echo=TRUE}
+plot(datos$X, datos$Y)
+```
+
+This picture shows in a more representative way, where the shots are taken. The shape of the graphic is similar to a football field, being the centre right of the picture the goal where the players are shooting. Thus, the graphic shows that almost every shot is taken from the center and from less than 20 meters of distance. 
+
+Now, the predicted variable will be studied with a pie chart.   
+
+```{r pie, echo = TRUE, include = TRUE, message = TRUE}
+pie(table(datos$goal), labels = c("Fail", "Goal"), main="Goals pie chart")
+```
+
+Looking at the graphic, it's observable the difference between the amount of shots that end scoring a goal and the amount of goals that will end missing. The discriminating analysis, the method that will be used to study the probabilities is acceptable when the categories are balanced so this is a problem that will need to be solved. The best form to do it is with undersampling or oversampling. Due to that there is no access to get more data, it will be used the undersampling.
+
+```{r undersampling}
+library(tidyverse)
+datos$goal <- ifelse(datos$goal == 0, "Miss", "Score")
+datos2 <- datos
+datos2$goal <- ifelse(datos2$goal == "Score", "Miss", "Score")
+datos2$Click <- 0
+datos$Click <- 1
+datos <- rbind(datos, datos2)
+
+library(ROSE)
+ 
+balanced_sample = NULL
+ 
+ 
+for (c in unique(datos$goal)) {
+  tmp_df = datos%>%filter(goal=="Score")
+  tmp<-ovun.sample(Click ~ ., data = tmp_df, method = "under", p = 0.5, seed = 5)$data
+  balanced_sample<-rbind(balanced_sample, tmp)
+ }
+
+shots <- balanced_sample[, -4]
+shots$goal <- balanced_sample$Click
+```
+
+The next is a graphic that classifies in red the shots that score and in black, the shots that miss.  
+
+```{r plort_groupby}
+plot(shots$X, shots$Y, col=factor(shots$goal))
+legend("topleft", legend = levels(factor(shots$goal)), pch = 19, col = factor(levels(shots$goal)))
+```
+
+he shots that score, are nearer to the goal line and usually in the center. Besides, it can be observed that the data have a certain curvature in the center (Y variable) so this is an argument in favor of the quadratic discriminant analysis. 
+
+To prove that a linear analysis would be useless in this case, the next graphic will describe if the differences between classes are observable or not. 
+ 
+
+```{r exploration_data, echo=FALSE, include = TRUE, message = TRUE}
+library(ggplot2)
+library(ggpubr)
+p1 <- ggplot(data = shots, aes(x = X, fill = goal)) +
+      geom_histogram(position = "identity", alpha = 0.5)
+p2 <- ggplot(data = shots, aes(x = Y, fill = goal)) +
+      geom_histogram(position = "identity", alpha = 0.5)
+ggarrange(p1, p2, nrow = 2, common.legend = TRUE, legend = "bottom")
+```
+
+In these histograms, it is shown what already was obvious. The distribution in the X variable in not normal as previously commented. 
+
+Besides, the different categories are not clearly distinguished so the linear analysis would be a disaster. 
+
+# Inference
+
+The final objective of this study is to be able to classify the shots taken in goal or in miss using the shot coordinates. Thus it will be made a discriminant analysis that will classify the shots using the coordinates. 
+
+Because of that it will be needed a division in the data. Some cases will be used as trainers of the model while the others will be the test in which the results will be predicted. The data used as training sample will be the 80% and for validation it will be used the k-fold method. 
+
+```{r dataPartition, echo=FALSE, include = TRUE, message = FALSE}
+library(caret)
+trainRows = createDataPartition(shots$goal, p=0.8, list = FALSE)
+trainData = shots[trainRows, ]
+testData = shots[-trainRows, ]
+myTrainControl = trainControl(method = "repeatedcv",  # k-fold
+                              number = 10,  # num folds
+                              repeats = 30) # num veces a repetir CV
+```
+
+A question that may appear is if it's needed to standardize the data. Not in this case because the results obtained would be the same. Besides, the quadratic discriminant analysis has the advantage to be quite strong against the outliers. However, it will be needed to know that the data doesn't follow a normal distribution when the results will be interpreted. 
+
+So the model is implemented. 
+
+```{r QDA_model, echo = FALSE, include = TRUE, message = FALSE}
+library(MASS)
+qda_model <- qda(goal ~ X + Y, data = trainData, CV = TRUE)
+qda_model2 <- qda(goal ~ X + Y, data = trainData)
+```
+
+# Validation
+
+Next the mistakes that may have appeared in the data will be studied. 
+
+```{r model_validation, echo=TRUE, include=TRUE}
+predicted <- predict(object = qda_model2, newdata = testData)
+table(testData$goal, predicted$class, 
+      dnn = c("Real Outcome", "Predict Outcome"))
+```
+
+This model has an accuracy of `r (642+925)/2268` and a rate of false positives of`r 179/642`. Both are acceptable. 
+
+# Model interpretation
+
+In order to visualize better this, the next graphic will show the probability and the coordinates. 
+
+```{r interactive_graphic, message=FALSE, echo = TRUE}
+library(plotly)
+library(gapminder)
+
+predictions <- trainData
+predictions$probFail = qda_model$posterior[, 1]
+predictions$probGoal = qda_model$posterior[, 2]
+library(ggplot2)
+
+graph = ggplot(predictions, aes(X, Y, size=probGoal, color =probFail)) + geom_point()
+ggplotly(p = graph)
+```
+
+In the model, it's shown that when the shot is taken from near the 120 metres (near to the goal) it will be certainly easy to score a goal. It will also be easy if the shot is taken from the centre and not from near the touchline. 
+
+But this model would be useless if it couldn't predict new variables, so the next chunk simply predicts the result based in the data introduced in the program. 
+
+```{r echo = TRUE, include = TRUE, }
+
+new <- data.frame(row.names = c("X", "Y"))
+new$X <- readline(prompt = "Enter X: ")
+new$Y <- readline(prompt = "Enter Y: ")
+
+new$X <- as.numeric(new$X)
+new$Y <- as.numeric(new$Y)
+
+
+predict(object = qda_model2, newdata = new)
+```
